@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="JARVIS">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#050a05">
+<title>JARVIS</title>
+
+<script>
+// Inline PWA manifest — enables Android Chrome "Add to Home Screen"
+const _manifest = {
+  name: "JARVIS - Personal Assistant",
+  short_name: "JARVIS",
+  start_url: "./",
+  display: "standalone",
+  background_color: "#050a05",
+  theme_color: "#050a05",
+  orientation: "portrait",
+  icons: [{
+    src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%23050a05'/%3E%3Ccircle cx='96' cy='80' r='32' fill='none' stroke='%2300ff41' stroke-width='5'/%3E%3Ccircle cx='96' cy='80' r='9' fill='%2300ff41'/%3E%3Ctext x='96' y='148' text-anchor='middle' fill='%2300ff41' font-size='20' font-family='monospace' letter-spacing='3'%3EJARVIS%3C/text%3E%3C/svg%3E",
+    sizes: "192x192", type: "image/svg+xml"
+  }]
+};
+try {
+  const _blob = new Blob([JSON.stringify(_manifest)], {type:'application/json'});
+  const _url  = URL.createObjectURL(_blob);
+  const _link = document.createElement('link');
+  _link.rel = 'manifest'; _link.href = _url;
+  document.currentScript.after(_link);
+} catch(e){}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg:      #050a05;
+    --bg2:     #0a0f0a;
+    --bg3:     #0f160f;
+    --border:  #1a2a1a;
+    --border2: #243624;
+    --text:    #00ff41;      /* Matrix green — primary */
+    --text2:   #00cc33;      /* slightly dimmer green */
+    --text3:   #008822;      /* mid green */
+    --text4:   #004d11;      /* dark green — subtle */
+    --accent:  #00ff41;
+    --red:     #ff4444;
+    --mono: 'IBM Plex Mono', monospace;
+    --serif: 'IBM Plex Mono', monospace;  /* mono everywhere for terminal feel */
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html { height: 100%; background: var(--bg); }
+  body { height: 100%; font-family: var(--mono); color: var(--text); overflow: hidden; background: var(--bg); overscroll-behavior: none; }
+
+  /* ── FIX KEYBOARD PUSH: screens use --app-height set by JS ── */
+  #screen-setup, #screen-main {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: var(--app-height, 100vh);
+    display: flex; flex-direction: column;
+  }
+  #screen-setup { background: var(--bg); align-items: center; justify-content: center; padding: 32px 24px; }
+  #screen-main { background: var(--bg); }
+
+  /* ── SETUP ── */
+  .setup-logo { font-size: 11px; letter-spacing: .2em; color: var(--text3); margin-bottom: 6px; }
+  .setup-title { font-family: var(--serif); font-size: 28px; font-style: italic; color: var(--text); font-weight: 400; margin-bottom: 8px; }
+  .setup-sub { font-size: 11px; color: var(--text4); line-height: 1.7; text-align: center; margin-bottom: 32px; }
+  .setup-label { font-size: 10px; color: var(--text3); letter-spacing: .12em; margin-bottom: 8px; align-self: flex-start; width: 100%; max-width: 360px; }
+  .setup-inp { width: 100%; max-width: 360px; background: var(--bg3); border: 1.5px solid var(--border2); color: var(--text); padding: 13px 16px; border-radius: 12px; font-family: var(--mono); font-size: 13px; outline: none; letter-spacing: .04em; transition: border .2s; }
+  .setup-inp:focus { border-color: var(--accent); }
+  .setup-inp::placeholder { color: var(--text4); }
+  .setup-hint { font-size: 10px; color: var(--text4); text-align: center; max-width: 300px; line-height: 1.7; margin-top: 10px; }
+  .setup-hint a { color: var(--accent); }
+  .setup-btn { width: 100%; max-width: 360px; background: var(--text); color: var(--bg); border: none; padding: 14px; border-radius: 12px; font-family: var(--mono); font-size: 13px; font-weight: 500; cursor: pointer; letter-spacing: .06em; margin-top: 16px; transition: opacity .2s; }
+  .setup-btn:hover { opacity: .88; }
+  .setup-btn:disabled { background: var(--bg3); color: var(--text4); cursor: not-allowed; opacity: 1; }
+  .setup-err { font-size: 11px; color: var(--red); text-align: center; margin-top: 8px; min-height: 18px; }
+
+  /* ── MAIN LAYOUT ── */
+  #header { padding: 14px 16px 12px; border-bottom: 1.5px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  #chat-wrap { flex: 1; overflow-y: auto; padding: 14px 16px 8px; -webkit-overflow-scrolling: touch; }
+  #input-bar { padding: 8px 14px env(safe-area-inset-bottom, 16px); border-top: 1.5px solid var(--border); flex-shrink: 0; background: var(--bg); padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  #input-row { display: flex; gap: 8px; align-items: center; }
+
+  /* ── HEADER ── */
+  .hd-left { display: flex; align-items: center; gap: 10px; }
+  .hd-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px #00ff4188; flex-shrink: 0; }
+  .hd-name { font-size: 14px; letter-spacing: .1em; font-weight: 500; color: var(--text); }
+  .hd-sub { font-size: 9px; color: var(--text3); letter-spacing: .13em; margin-top: 1px; }
+  #board-btn { background: none; border: 1.5px solid var(--border); border-radius: 9px; padding: 7px 12px; cursor: pointer; font-family: var(--mono); font-size: 11px; color: var(--text3); letter-spacing: .05em; transition: all .2s; }
+  #board-btn.has-open { color: var(--red); border-color: #1a3a1a; }
+
+  /* ── INPUT ── */
+  #inp { flex: 1; background: var(--bg3); border: 1.5px solid var(--border2); color: var(--text); padding: 12px 14px; border-radius: 12px; font-family: var(--mono); font-size: 15px; outline: none; transition: border .2s; -webkit-appearance: none; }
+  #inp:focus { border-color: var(--border2); }
+  #inp::placeholder { color: var(--text4); }
+  #inp:disabled { opacity: .5; }
+  #send { background: var(--text); color: var(--bg); border: none; width: 44px; height: 44px; border-radius: 12px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: opacity .15s; font-family: var(--mono); }
+  #send:disabled { background: var(--bg3); color: var(--text4); cursor: not-allowed; }
+  .inp-hint { font-size: 9px; color: var(--text4); text-align: center; margin-top: 7px; letter-spacing: .1em; }
+
+  /* ── EMPTY STATE ── */
+  .empty-quote { font-family: var(--serif); font-size: 20px; color: var(--text3); font-style: italic; line-height: 1.6; margin-bottom: 24px; font-weight: 300; }
+  .qs-label { font-size: 10px; color: var(--text4); letter-spacing: .14em; margin-bottom: 10px; }
+  .qs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 20px; }
+  .qs-btn { background: var(--bg3); border: 1.5px solid var(--border2); border-radius: 10px; padding: 11px 12px; font-size: 12px; color: var(--text2); cursor: pointer; text-align: left; font-family: var(--mono); line-height: 1.35; transition: all .2s; }
+  .qs-btn:hover, .qs-btn:active { color: var(--text); border-color: #3a3a3a; background: var(--bg2); }
+  .how-card { background: var(--bg3); border: 1.5px solid var(--border); border-radius: 12px; padding: 13px 14px; }
+  .how-label { font-size: 9px; color: var(--text4); letter-spacing: .14em; margin-bottom: 9px; }
+  .how-item { font-size: 11px; color: var(--text3); line-height: 1.65; padding-left: 9px; border-left: 2px solid var(--border2); margin-bottom: 6px; }
+  .how-item:last-child { margin-bottom: 0; }
+
+  /* ── MESSAGES ── */
+  .msg-wrap { margin-bottom: 16px; animation: fi .22s ease; }
+  .msg-user { display: flex; justify-content: flex-end; }
+  .msg-user-bubble { max-width: 82%; background: var(--bg3); border: 1.5px solid var(--border); border-radius: 12px 12px 3px 12px; padding: 10px 14px; font-size: 13px; color: var(--text2); line-height: 1.6; }
+  .msg-jarvis { display: flex; gap: 10px; align-items: flex-start; }
+  .msg-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 5px #00ff4155; margin-top: 7px; flex-shrink: 0; }
+  .msg-body { flex: 1; }
+  .msg-text { font-family: var(--serif); font-size: 16px; color: #00ff41; line-height: 1.75; white-space: pre-wrap; font-weight: 400; }
+  .msg-time { font-size: 9px; color: var(--text4); margin-top: 5px; letter-spacing: .08em; }
+
+  /* ── TYPING ── */
+  .typing { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; animation: fi .2s ease; }
+  .tdots { display: flex; gap: 5px; }
+  .tdot { width: 5px; height: 5px; border-radius: 50%; background: var(--text4); animation: pulse 1.2s ease-in-out infinite; }
+
+  /* ── PANEL OVERLAY ── */
+  #panel-overlay { position: fixed; inset: 0; background: #000000aa; z-index: 20; display: none; animation: fo .2s ease; }
+  #panel-overlay.open { display: block; }
+  #panel { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-radius: 20px 20px 0 0; border-top: 1.5px solid var(--border2); max-height: 82vh; display: flex; flex-direction: column; z-index: 21; transform: translateY(100%); transition: transform .28s cubic-bezier(.32,.72,0,1); }
+  #panel.open { transform: translateY(0); }
+  #panel-handle { display: flex; justify-content: center; padding: 13px 0 6px; flex-shrink: 0; cursor: pointer; }
+  #panel-handle div { width: 38px; height: 4px; border-radius: 2px; background: var(--border2); }
+  #panel-head { padding: 0 16px 10px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+  #panel-body { overflow-y: auto; padding: 0 14px 36px; -webkit-overflow-scrolling: touch; }
+
+  /* ── BOARD CARDS ── */
+  .pcard { background: var(--bg3); border: 1.5px solid var(--border); border-radius: 12px; padding: 13px 14px; margin-bottom: 8px; }
+  .pcard-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .pcard-name { font-size: 13px; color: var(--text); font-weight: 500; line-height: 1.3; flex: 1; margin-right: 8px; }
+  .pcard-meta { font-size: 10px; color: var(--text4); margin-top: 2px; letter-spacing: .04em; }
+  .trow { display: flex; align-items: flex-start; gap: 9px; padding: 7px 0; border-bottom: 1px solid #1a1a1a; }
+  .trow:last-of-type { border-bottom: none; }
+  .cb { width: 17px; height: 17px; border-radius: 50%; border: 1.5px solid #3a3a3a; cursor: pointer; flex-shrink: 0; margin-top: 2px; display: flex; align-items: center; justify-content: center; transition: all .2s; }
+  .cb:active { transform: scale(.9); }
+  .ttext { flex: 1; font-size: 12px; color: var(--text2); line-height: 1.4; margin-top: 1px; }
+  .ttext.done { color: var(--text4); text-decoration: line-through; }
+  .xbtn { background: none; border: none; color: var(--text4); cursor: pointer; font-size: 18px; padding: 0 3px; flex-shrink: 0; line-height: 1; transition: color .2s; }
+  .xbtn:active { color: var(--red); }
+  .prog { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 8px; }
+  .prog-fill { height: 100%; border-radius: 2px; transition: width .5s ease; }
+  .log-chip { margin-top: 9px; padding: 7px 10px; background: var(--bg); border-radius: 7px; }
+  .log-label { font-size: 9px; color: var(--text4); margin-bottom: 2px; letter-spacing: .08em; }
+  .log-text { font-size: 11px; color: var(--text3); line-height: 1.5; }
+  .note-row { background: var(--bg3); border: 1.5px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 7px; display: flex; gap: 9px; align-items: flex-start; }
+  .note-text { flex: 1; font-size: 12px; color: var(--text3); line-height: 1.5; }
+
+  /* ── NEW PROJECT FORM ── */
+  .np-form { background: var(--bg3); border: 1.5px solid var(--border2); border-radius: 12px; padding: 14px; margin-bottom: 10px; animation: fi .2s ease; }
+  .form-label { font-size: 10px; color: var(--text3); letter-spacing: .12em; margin-bottom: 8px; }
+  .form-inp { width: 100%; background: var(--bg); border: 1.5px solid var(--border2); color: var(--text); padding: 10px 12px; border-radius: 9px; font-family: var(--mono); font-size: 13px; outline: none; margin-bottom: 11px; transition: border .2s; }
+  .form-inp:focus { border-color: #3a3a3a; }
+  .form-inp::placeholder { color: var(--text4); }
+  .swatches { display: flex; gap: 8px; margin-bottom: 13px; flex-wrap: wrap; }
+  .swatch { width: 24px; height: 24px; border-radius: 50%; cursor: pointer; border: 2.5px solid transparent; transition: transform .15s, border-color .15s; }
+  .swatch:active { transform: scale(.9); }
+  .swatch.on { border-color: #fff; }
+  .form-btns { display: flex; gap: 7px; }
+
+  /* ── CONFIRM BAR ── */
+  .confirm { background: #0a1a0a; border: 1.5px solid #1a3a1a; border-radius: 10px; padding: 11px 13px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; animation: fi .15s ease; }
+  .confirm-text { font-size: 11px; color: #ff4444; flex: 1; }
+
+  /* ── MINI BUTTONS ── */
+  .mini { background: var(--bg); border: 1.5px solid var(--border2); color: var(--text2); font-family: var(--mono); font-size: 10px; padding: 6px 11px; border-radius: 7px; cursor: pointer; letter-spacing: .04em; transition: all .2s; }
+  .mini:active { opacity: .7; }
+  .mini.ok { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .mini:disabled { opacity: .35; cursor: not-allowed; }
+  .section-label { font-size: 9px; color: var(--text4); letter-spacing: .14em; margin-bottom: 8px; }
+
+  /* ── EMPTY BOARD ── */
+  .board-empty { text-align: center; padding: 40px 0; color: var(--text4); font-size: 12px; line-height: 2.2; }
+  .board-empty span { color: var(--text3); }
+
+  /* ── SETTINGS COG ── */
+  #settings-btn { background: none; border: none; cursor: pointer; color: var(--text4); font-size: 16px; padding: 4px; line-height: 1; transition: color .2s; }
+  #settings-btn:active { color: var(--text); }
+
+  /* ── ANIMATIONS ── */
+  @keyframes fi { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes fo { from { opacity:0; } to { opacity:1; } }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+
+  /* Matrix scanline overlay */
+  #screen-main::before {
+    content: '';
+    position: fixed; inset: 0; pointer-events: none; z-index: 999;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,65,0.015) 2px, rgba(0,255,65,0.015) 4px);
+  }
+  /* Green glow on borders */
+  #header { border-bottom-color: #1a3a1a; }
+  #input-bar { border-top-color: #1a3a1a; }
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 2px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); }
+</style>
+</head>
+<body>
+
+<!-- ══ SETUP SCREEN ══ -->
+<div id="screen-setup">
+  <div class="setup-logo">LOGIC STUDIO</div>
+  <div class="setup-title">JARVIS</div>
+  <div class="setup-sub">Your personal AI assistant.<br>Enter your Anthropic API key to begin.<br>Stored locally on your device only.</div>
+  <div class="setup-label">ANTHROPIC API KEY</div>
+  <input class="setup-inp" id="api-key-inp" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+  <div class="setup-hint">Get your key at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a><br>→ API Keys → Create Key</div>
+  <button class="setup-btn" id="setup-btn" disabled>Start JARVIS →</button>
+  <div class="setup-err" id="setup-err"></div>
+</div>
+
+<!-- ══ MAIN SCREEN ══ -->
+<div id="screen-main" style="display:none;">
+
+  <!-- Header -->
+  <div id="header">
+    <div class="hd-left">
+      <div class="hd-dot" id="hd-dot"></div>
+      <div>
+        <div class="hd-name">JARVIS</div>
+        <div class="hd-sub">PERSONAL ASSISTANT</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button id="board-btn" onclick="togglePanel()">⊞ board</button>
+      <button id="settings-btn" onclick="showSettings()" title="Settings">⚙</button>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <div id="chat-wrap"></div>
+
+  <!-- Input -->
+  <div id="input-bar">
+    <div id="input-row">
+      <input id="inp" type="text" placeholder="Tell me anything…" autocomplete="off" spellcheck="false">
+      <button id="send" onclick="sendMsg()">↑</button>
+    </div>
+    <div class="inp-hint">ENTER to send</div>
+  </div>
+</div>
+
+<!-- ══ PANEL OVERLAY ══ -->
+<div id="panel-overlay" onclick="closePanel()"></div>
+<div id="panel">
+  <div id="panel-handle" onclick="closePanel()"><div></div></div>
+  <div id="panel-head">
+    <div class="section-label" style="margin:0;">PROJECTS & TASKS</div>
+    <button class="mini" style="color:var(--accent);" onclick="toggleNpForm()">+ project</button>
+  </div>
+  <div id="panel-body"></div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════════
+let API_KEY = '';
+let data = { projects:{}, generalTasks:[], notes:[] };
+let msgs = [];  // {role, content, ts}
+let busy = false;
+let delConfirm = null;
+let npFormOpen = false;
+let npName = '';
+let npColor = '#4a9eff';
+
+const COLORS = ['#4a9eff','#ff6b6b','#ffd93d','#6bcb77','#c77dff','#4ecdc4','#ff9f43','#e056aa'];
+const QUICK  = ["What's pending?","What should I do next?","Summarise everything","What did I last work on?"];
+
+// ══════════════════════════════════════════════════════════════════
+// UTILS
+// ══════════════════════════════════════════════════════════════════
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+function timeAgo(ts) {
+  if (!ts) return '';
+  const d = Date.now() - ts;
+  if (d < 60000) return 'just now';
+  if (d < 3600000) return Math.floor(d/60000) + 'm ago';
+  if (d < 86400000) return Math.floor(d/3600000) + 'h ago';
+  if (d < 604800000) return Math.floor(d/86400000) + 'd ago';
+  return new Date(ts).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PERSISTENCE
+// ══════════════════════════════════════════════════════════════════
+function saveAll() {
+  try {
+    localStorage.setItem('jv3-data', JSON.stringify(data));
+    localStorage.setItem('jv3-msgs', JSON.stringify(msgs.slice(-50)));
+  } catch(e) {}
+}
+
+function loadAll() {
+  try {
+    const d = localStorage.getItem('jv3-data');
+    const m = localStorage.getItem('jv3-msgs');
+    if (d) data = JSON.parse(d);
+    if (m) msgs = JSON.parse(m);
+  } catch(e) {}
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SYSTEM PROMPT
+// ══════════════════════════════════════════════════════════════════
+function buildSystem() {
+  const now = new Date().toLocaleString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true});
+  let s = `You are JARVIS — a razor-sharp personal assistant for an electronics engineer/educator in Ahmedabad, India. Current time: ${now}.
+
+When they brief you:
+- Answer concisely (2–5 lines, or a list when needed)
+- Silently update data by appending <ACT>[...]</ACT> at the very end
+- Never mention ACT. Never say "I've updated" — just confirm naturally.
+
+ACTIONS (always a JSON array, even one action):
+{"t":"add_project","name":"string","color":"#hex"}
+{"t":"add_task","proj":"project name or null","text":"string","priority":"high|normal|low"}
+{"t":"done_task","proj":"project name or null","match":"partial task text"}
+{"t":"undo_task","proj":"project name or null","match":"partial task text"}
+{"t":"del_task","proj":"project name or null","match":"partial task text"}
+{"t":"add_log","proj":"project name","text":"string"}
+{"t":"add_note","text":"string"}
+{"t":"del_note","id":"note_id"}
+{"t":"del_project","name":"project name"}
+
+MATCHING: match tasks by first ~15 chars, case-insensitive.
+
+━━ LIVE DATA ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+
+  const projs = Object.values(data.projects).sort((a,b)=>b.updatedAt-a.updatedAt);
+  if (!projs.length) { s += '\nPROJECTS: none\n'; }
+  else {
+    s += '\nPROJECTS:\n';
+    projs.forEach(p => {
+      const open = (p.tasks||[]).filter(t=>!t.done);
+      const done = (p.tasks||[]).filter(t=>t.done);
+      s += `\n▸ ${p.name} [${timeAgo(p.updatedAt)}]\n`;
+      s += `  Open (${open.length}): ${open.map(t=>`"${t.text}"[${t.priority||'normal'}]`).join(' | ')||'none'}\n`;
+      s += `  Done (${done.length}): ${done.slice(-3).map(t=>`"${t.text}"`).join(' | ')||'none'}\n`;
+      if (p.logs?.length) s += `  Last log: "${p.logs[0].text}" — ${timeAgo(p.logs[0].ts)}\n`;
+    });
+  }
+  const gen = data.generalTasks||[];
+  if (gen.length) {
+    s += '\nGENERAL TASKS:\n';
+    gen.filter(t=>!t.done).forEach(t=>s+=`  [open] "${t.text}" [${t.priority||'normal'}]\n`);
+    gen.filter(t=>t.done).slice(-3).forEach(t=>s+=`  [done] "${t.text}"\n`);
+  }
+  const notes = data.notes||[];
+  if (notes.length) {
+    s += '\nNOTES:\n';
+    notes.forEach(n=>s+=`  [${n.id}] "${n.text}" (${timeAgo(n.ts)})\n`);
+  }
+  s += '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBe direct. No filler. Prioritised list when asked what\'s pending or what to do next.';
+  return s;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// APPLY ACTIONS — handles both array and single object
+// ══════════════════════════════════════════════════════════════════
+function applyAct(raw) {
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return; }
+  const actions = Array.isArray(parsed) ? parsed : [parsed];
+
+  for (const a of actions) {
+    if (!a?.t) continue;
+
+    if (a.t === 'add_project') {
+      const id = uid();
+      data.projects[id] = {id, name:a.name, color:a.color||'#4a9eff', tasks:[], logs:[], createdAt:Date.now(), updatedAt:Date.now()};
+
+    } else if (a.t === 'del_project') {
+      const p = fp(a.name); if(p) delete data.projects[p.id];
+
+    } else if (a.t === 'add_task') {
+      const task = {id:uid(), text:a.text, done:false, priority:a.priority||'normal', ts:Date.now()};
+      if (a.proj) { const p=fp(a.proj); if(p){p.tasks.push(task);p.updatedAt=Date.now();}else data.generalTasks.push(task); }
+      else data.generalTasks.push(task);
+
+    } else if (a.t === 'done_task' || a.t === 'undo_task') {
+      const isDone = a.t === 'done_task';
+      const needle = (a.match||'').toLowerCase().slice(0,20);
+      let hit = false;
+      if (a.proj) { const p=fp(a.proj); if(p){const t=p.tasks.find(t=>t.text.toLowerCase().includes(needle));if(t){t.done=isDone;t.doneAt=isDone?Date.now():null;p.updatedAt=Date.now();hit=true;}}}
+      if (!hit) { for(const p of Object.values(data.projects)){const t=p.tasks.find(t=>t.text.toLowerCase().includes(needle));if(t){t.done=isDone;t.doneAt=isDone?Date.now():null;p.updatedAt=Date.now();hit=true;break;}}}
+      if (!hit) { const t=data.generalTasks.find(t=>t.text.toLowerCase().includes(needle));if(t){t.done=isDone;t.doneAt=isDone?Date.now():null;}}
+
+    } else if (a.t === 'del_task') {
+      const needle = (a.match||'').toLowerCase().slice(0,20);
+      if (a.proj){const p=fp(a.proj);if(p){p.tasks=p.tasks.filter(t=>!t.text.toLowerCase().includes(needle));p.updatedAt=Date.now();}}
+      else{Object.values(data.projects).forEach(p=>p.tasks=p.tasks.filter(t=>!t.text.toLowerCase().includes(needle)));data.generalTasks=data.generalTasks.filter(t=>!t.text.toLowerCase().includes(needle));}
+
+    } else if (a.t === 'add_log') {
+      const p=fp(a.proj||'');if(p){p.logs.unshift({id:uid(),text:a.text,ts:Date.now()});p.updatedAt=Date.now();}
+
+    } else if (a.t === 'add_note') {
+      data.notes.unshift({id:uid(),text:a.text,ts:Date.now()});
+
+    } else if (a.t === 'del_note') {
+      data.notes=data.notes.filter(n=>n.id!==a.id);
+    }
+  }
+}
+
+function fp(name) {
+  const n=(name||'').toLowerCase().slice(0,14);
+  return Object.values(data.projects).find(p=>p.name.toLowerCase().includes(n))||null;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// API CALL
+// ══════════════════════════════════════════════════════════════════
+async function callAPI() {
+  const apiMsgs = msgs.slice(-20).map(m=>({role:m.role, content:m.content}));
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'x-api-key': API_KEY,
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      system: buildSystem(),
+      messages: apiMsgs,
+    })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(()=>({error:{message:'Unknown error'}}));
+    throw new Error(err.error?.message || `HTTP ${res.status}`);
+  }
+  const json = await res.json();
+  return json.content?.find(b=>b.type==='text')?.text || 'No response.';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SEND MESSAGE
+// ══════════════════════════════════════════════════════════════════
+async function sendMsg(text) {
+  const msg = (text !== undefined ? text : document.getElementById('inp').value).trim();
+  if (!msg || busy) return;
+  document.getElementById('inp').value = '';
+  setBusy(true);
+
+  msgs.push({role:'user', content:msg, ts:Date.now()});
+  renderChat();
+
+  try {
+    const raw = await callAPI();
+    const actM = raw.match(/<ACT>([\s\S]*?)<\/ACT>/);
+    const display = raw.replace(/<ACT>[\s\S]*?<\/ACT>/g,'').trim();
+    if (actM) applyAct(actM[1].trim());
+    msgs.push({role:'assistant', content:display, ts:Date.now()});
+    saveAll();
+    renderChat();
+    updateBoardBtn();
+    if (document.getElementById('panel').classList.contains('open')) renderBoard();
+  } catch(e) {
+    msgs.push({role:'assistant', content:`Error: ${e.message}`, ts:Date.now()});
+    renderChat();
+  }
+  setBusy(false);
+  document.getElementById('inp').focus();
+}
+
+function setBusy(b) {
+  busy = b;
+  document.getElementById('send').disabled = b;
+  document.getElementById('inp').disabled = b;
+  if (b) showTyping(); else hideTyping();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// RENDER CHAT
+// ══════════════════════════════════════════════════════════════════
+function renderChat() {
+  const wrap = document.getElementById('chat-wrap');
+  const empty = msgs.length === 0;
+
+  if (empty) {
+    wrap.innerHTML = `
+      <div style="padding-top:20px;padding-bottom:16px;animation:fi .25s ease;">
+        <div class="empty-quote">"Online. What's on your mind?"</div>
+        <div class="qs-label">QUICK START</div>
+        <div class="qs-grid">
+          ${QUICK.map(q=>`<button class="qs-btn" onclick="sendMsg(${JSON.stringify(q)})">${esc(q)}</button>`).join('')}
+        </div>
+        <div class="how-card">
+          <div class="how-label">HOW TO USE</div>
+          <div class="how-item">"Finished soldering FLUX v1.2 board"</div>
+          <div class="how-item">"Add task: check J3 connector orientation"</div>
+          <div class="how-item">"Create project: WiFi Board"</div>
+          <div class="how-item">"What should I focus on right now?"</div>
+        </div>
+      </div>`;
+    return;
+  }
+
+  let html = '';
+  msgs.forEach((m, i) => {
+    if (m.role === 'user') {
+      html += `<div class="msg-wrap"><div class="msg-user"><div class="msg-user-bubble">${esc(m.content)}</div></div></div>`;
+    } else {
+      const isLast = i === msgs.length - 1;
+      html += `<div class="msg-wrap">
+        <div class="msg-jarvis">
+          <div class="msg-dot"></div>
+          <div class="msg-body">
+            <div class="msg-text">${esc(m.content)}</div>
+            ${isLast ? `<div class="msg-time">${timeAgo(m.ts)}</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }
+  });
+
+  wrap.innerHTML = html;
+  scrollBottom();
+}
+
+let typingEl = null;
+function showTyping() {
+  if (typingEl) return;
+  typingEl = document.createElement('div');
+  typingEl.className = 'typing';
+  typingEl.innerHTML = `<div class="msg-dot"></div><div class="tdots">${[0,.3,.6].map(d=>`<div class="tdot" style="animation-delay:${d}s"></div>`).join('')}</div>`;
+  document.getElementById('chat-wrap').appendChild(typingEl);
+  scrollBottom();
+}
+function hideTyping() {
+  if (typingEl) { typingEl.remove(); typingEl = null; }
+}
+function scrollBottom() {
+  const w = document.getElementById('chat-wrap');
+  setTimeout(()=>w.scrollTop=w.scrollHeight, 30);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// BOARD PANEL
+// ══════════════════════════════════════════════════════════════════
+function togglePanel() {
+  const panel = document.getElementById('panel');
+  if (panel.classList.contains('open')) closePanel();
+  else openPanel();
+}
+function openPanel() {
+  delConfirm = null; npFormOpen = false;
+  document.getElementById('panel-overlay').classList.add('open');
+  document.getElementById('panel').classList.add('open');
+  renderBoard();
+}
+function closePanel() {
+  document.getElementById('panel-overlay').classList.remove('open');
+  document.getElementById('panel').classList.remove('open');
+}
+
+function updateBoardBtn() {
+  const projs = Object.values(data.projects);
+  const allOpen = projs.reduce((s,p)=>s+p.tasks.filter(t=>!t.done).length,0) + data.generalTasks.filter(t=>!t.done).length;
+  const btn = document.getElementById('board-btn');
+  if (allOpen > 0) {
+    btn.className = 'has-open'; btn.id = 'board-btn';
+    btn.innerHTML = `● ${allOpen} open`;
+    btn.style.cssText = 'background:none;border:1.5px solid #1a3a1a;border-radius:9px;padding:7px 12px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--red);letter-spacing:.05em;';
+  } else {
+    btn.style.cssText = 'background:none;border:1.5px solid var(--border);border-radius:9px;padding:7px 12px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text3);letter-spacing:.05em;';
+    btn.innerHTML = '⊞ board';
+  }
+}
+
+function renderBoard() {
+  const projs = Object.values(data.projects).sort((a,b)=>b.updatedAt-a.updatedAt);
+  let html = '';
+
+  // np form
+  if (npFormOpen) {
+    html += `<div class="np-form">
+      <div class="form-label">NEW PROJECT</div>
+      <input class="form-inp" id="np-inp" value="${esc(npName)}" placeholder="Project name…" oninput="npName=this.value" onkeydown="if(event.key==='Enter')createProject()">
+      <div class="swatches">${COLORS.map(c=>`<div class="swatch${npColor===c?' on':''}" style="background:${c}" onclick="npColor='${c}';renderBoard()"></div>`).join('')}</div>
+      <div class="form-btns">
+        <button class="mini" onclick="npFormOpen=false;renderBoard()">cancel</button>
+        <button class="mini ok" onclick="createProject()" ${!npName.trim()?'disabled':''}>create</button>
+      </div>
+    </div>`;
+  }
+
+  // confirm
+  if (delConfirm) {
+    html += `<div class="confirm">
+      <div class="confirm-text">Delete "${esc(delConfirm.label)}"?</div>
+      <div style="display:flex;gap:7px;flex-shrink:0;">
+        <button class="mini" onclick="delConfirm=null;renderBoard()">cancel</button>
+        <button class="mini" style="color:var(--red);" onclick="execDelete()">delete</button>
+      </div>
+    </div>`;
+  }
+
+  // general tasks
+  if (data.generalTasks.length > 0) {
+    html += `<div class="pcard" style="border-left:3px solid #333;margin-bottom:8px;">
+      <div class="section-label">GENERAL</div>
+      ${data.generalTasks.map(t=>`
+        <div class="trow">
+          <div class="cb" onclick="toggleTask(null,'${t.id}')" style="${t.done?'background:#4a9eff22;border-color:#4a9eff55;':''}">
+            ${t.done?`<span style="font-size:9px;color:var(--accent);font-weight:700;">✓</span>`:''}
+          </div>
+          <div class="ttext ${t.done?'done':''}">${esc(t.text)}</div>
+          <button class="xbtn" onclick="askDel('task',null,'${t.id}','${esc(t.text.slice(0,24))}')">×</button>
+        </div>`).join('')}
+    </div>`;
+  }
+
+  if (projs.length === 0 && data.generalTasks.length === 0) {
+    html += `<div class="board-empty">No projects yet.<br><span>Say "create a project called X"</span><br><span>or tap + above</span></div>`;
+  }
+
+  projs.forEach(p => {
+    const open = p.tasks.filter(t=>!t.done);
+    const done = p.tasks.filter(t=>t.done);
+    const pct  = p.tasks.length ? Math.round(done.length/p.tasks.length*100) : 0;
+    html += `<div class="pcard" style="border-left:3px solid ${p.color};">
+      <div class="pcard-head">
+        <div>
+          <div class="pcard-name">${esc(p.name)}</div>
+          <div class="pcard-meta">${timeAgo(p.updatedAt)} · ${open.length} open</div>
+        </div>
+        <button class="xbtn" style="opacity:1;margin-top:1px;" onclick="askDel('project',null,'${p.id}','${esc(p.name)}')">×</button>
+      </div>
+      ${p.tasks.map(t=>`
+        <div class="trow">
+          <div class="cb" onclick="toggleTask('${p.id}','${t.id}')" style="${t.done?`background:${p.color}22;border-color:${p.color}55;`:`border-color:${p.color}55;`}">
+            ${t.done?`<span style="font-size:9px;color:${p.color};font-weight:700;">✓</span>`:''}
+          </div>
+          <div class="ttext ${t.done?'done':''}">${esc(t.text)}${!t.done&&t.priority==='high'?`<span style="color:var(--red);margin-left:6px;font-size:9px;">●</span>`:''}</div>
+          <button class="xbtn" onclick="askDel('task','${p.id}','${t.id}','${esc(t.text.slice(0,24))}')">×</button>
+        </div>`).join('')}
+      ${p.tasks.length?`<div class="prog"><div class="prog-fill" style="width:${pct}%;background:${p.color};"></div></div>`:''}
+      ${p.logs[0]?`<div class="log-chip" style="border-left:2px solid ${p.color}44;">
+        <div class="log-label">LAST LOG · ${timeAgo(p.logs[0].ts)}</div>
+        <div class="log-text">${esc(p.logs[0].text)}</div>
+      </div>`:''}
+      <div style="margin-top:9px;">
+        <button class="mini" style="font-size:9px;" onclick="askJarvis('${esc(p.name)}')">ask JARVIS →</button>
+      </div>
+    </div>`;
+  });
+
+  if (data.notes.length > 0) {
+    html += `<div style="margin-top:4px;"><div class="section-label" style="text-align:center;margin:12px 0 9px;">PINNED NOTES</div>`;
+    data.notes.forEach(n => {
+      html += `<div class="note-row">
+        <div class="note-text">📌 ${esc(n.text)}</div>
+        <button class="xbtn" style="opacity:1;" onclick="askDel('note',null,'${n.id}','${esc(n.text.slice(0,20))}')">×</button>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  document.getElementById('panel-body').innerHTML = html;
+  if (npFormOpen) setTimeout(()=>document.getElementById('np-inp')?.focus(), 50);
+}
+
+function toggleNpForm() { npFormOpen = !npFormOpen; npName=''; renderBoard(); }
+
+function createProject() {
+  if (!npName.trim()) return;
+  const id = uid();
+  data.projects[id] = {id, name:npName.trim(), color:npColor, tasks:[], logs:[], createdAt:Date.now(), updatedAt:Date.now()};
+  npFormOpen = false; npName = ''; npColor = COLORS[0];
+  saveAll(); renderBoard(); updateBoardBtn();
+}
+
+function toggleTask(projId, taskId) {
+  if (projId) {
+    const p = data.projects[projId];
+    const t = p.tasks.find(t=>t.id===taskId);
+    if(t){t.done=!t.done;t.doneAt=t.done?Date.now():null;p.updatedAt=Date.now();}
+  } else {
+    const t = data.generalTasks.find(t=>t.id===taskId);
+    if(t){t.done=!t.done;t.doneAt=t.done?Date.now():null;}
+  }
+  saveAll(); renderBoard(); updateBoardBtn();
+}
+
+function askDel(type, projId, id, label) {
+  delConfirm = {type, projId, id, label};
+  renderBoard();
+}
+
+function execDelete() {
+  if (!delConfirm) return;
+  const {type,projId,id} = delConfirm;
+  if (type==='task') {
+    if(projId){const p=data.projects[projId];p.tasks=p.tasks.filter(t=>t.id!==id);p.updatedAt=Date.now();}
+    else data.generalTasks=data.generalTasks.filter(t=>t.id!==id);
+  } else if (type==='note') {
+    data.notes=data.notes.filter(n=>n.id!==id);
+  } else if (type==='project') {
+    delete data.projects[id];
+  }
+  delConfirm = null;
+  saveAll(); renderBoard(); updateBoardBtn();
+}
+
+function askJarvis(name) {
+  closePanel();
+  const inp = document.getElementById('inp');
+  inp.value = `What's the status of ${name}?`;
+  inp.focus();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SETTINGS (change API key)
+// ══════════════════════════════════════════════════════════════════
+function showSettings() {
+  const newKey = prompt('Update API key (leave blank to cancel):');
+  if (newKey && newKey.trim().startsWith('sk-ant-')) {
+    API_KEY = newKey.trim();
+    localStorage.setItem('jv3-key', API_KEY);
+    alert('API key updated.');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SETUP SCREEN
+// ══════════════════════════════════════════════════════════════════
+function initSetup() {
+  const inp = document.getElementById('api-key-inp');
+  const btn = document.getElementById('setup-btn');
+  inp.addEventListener('input', ()=> btn.disabled = !inp.value.trim().startsWith('sk-ant-'));
+  inp.addEventListener('keydown', e=>{ if(e.key==='Enter') trySetup(); });
+  btn.addEventListener('click', trySetup);
+}
+
+async function trySetup() {
+  const key = document.getElementById('api-key-inp').value.trim();
+  if (!key.startsWith('sk-ant-')) {
+    document.getElementById('setup-err').textContent = 'Key must start with sk-ant-';
+    return;
+  }
+  document.getElementById('setup-btn').disabled = true;
+  document.getElementById('setup-btn').textContent = 'Verifying…';
+  document.getElementById('setup-err').textContent = '';
+
+  // quick test call
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','anthropic-version':'2023-06-01','x-api-key':key,'anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:5,messages:[{role:'user',content:'hi'}]})
+    });
+    if (!res.ok) throw new Error((await res.json()).error?.message||'Invalid key');
+    API_KEY = key;
+    localStorage.setItem('jv3-key', key);
+    startApp();
+  } catch(e) {
+    document.getElementById('setup-err').textContent = e.message;
+    document.getElementById('setup-btn').disabled = false;
+    document.getElementById('setup-btn').textContent = 'Start JARVIS →';
+  }
+}
+
+function startApp() {
+  document.getElementById('screen-setup').style.display = 'none';
+  document.getElementById('screen-main').style.display = 'flex';
+  loadAll();
+  renderChat();
+  updateBoardBtn();
+  document.getElementById('inp').addEventListener('keydown', e=>{
+    if(e.key==='Enter'&&!e.shiftKey&&!busy){e.preventDefault();sendMsg();}
+  });
+  document.getElementById('inp').focus();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// BOOT
+// ══════════════════════════════════════════════════════════════════
+
+// ── FIX: keyboard height — prevent layout shift when keyboard opens ──
+function setAppHeight() {
+  document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+}
+setAppHeight();
+window.addEventListener('resize', () => {
+  setAppHeight();
+  // scroll chat to bottom when keyboard opens/closes
+  setTimeout(() => {
+    const cw = document.getElementById('chat-wrap');
+    if (cw) cw.scrollTop = cw.scrollHeight;
+  }, 100);
+});
+// On input focus (keyboard open), scroll last message into view after delay
+document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('focusin', (e) => {
+    if (e.target.id === 'inp' || e.target.id === 'api-key-inp') {
+      setTimeout(() => {
+        const cw = document.getElementById('chat-wrap');
+        if (cw) cw.scrollTop = cw.scrollHeight;
+        e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 350);
+    }
+  });
+});
+
+window.addEventListener('DOMContentLoaded', ()=>{
+  const saved = localStorage.getItem('jv3-key');
+  if (saved) {
+    API_KEY = saved;
+    startApp();
+  } else {
+    initSetup();
+  }
+});
+</script>
+</body>
+</html>
