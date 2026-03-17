@@ -237,8 +237,10 @@ try {
         <div class="hd-sub">PERSONAL ASSISTANT</div>
       </div>
     </div>
-    <div style="display:flex;gap:10px;align-items:center;">
+    <div style="display:flex;gap:8px;align-items:center;">
+      <div id="ctx-badge" style="display:none;font-size:9px;padding:3px 7px;border-radius:4px;border:1px solid;letter-spacing:.08em;cursor:pointer;" onclick="summariseOldMsgs()" title="Tap to compress history"></div>
       <button id="board-btn" onclick="togglePanel()">⊞ board</button>
+      <button id="clear-btn" onclick="clearChat()" title="Clear chat" style="background:none;border:1.5px solid var(--border);border-radius:9px;padding:7px 10px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text4);letter-spacing:.05em;transition:all .2s;">✕ clear</button>
       <button id="settings-btn" onclick="showSettings()" title="Settings">⚙</button>
     </div>
   </div>
@@ -316,8 +318,10 @@ function loadAll() {
   try {
     const d = localStorage.getItem('jv3-data');
     const m = localStorage.getItem('jv3-msgs');
+    const dg = localStorage.getItem('jv3-digest');
     if (d) data = JSON.parse(d);
     if (m) msgs = JSON.parse(m);
+    if (dg) ctxDigest = dg;
   } catch(e) {}
 }
 
@@ -328,12 +332,9 @@ function buildSystem() {
   const now = new Date().toLocaleString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true});
   let s = `You are JARVIS — a razor-sharp personal assistant for an electronics engineer/educator in Ahmedabad, India. Current time: ${now}.
 
-When they brief you:
-- Answer concisely (2–5 lines, or a list when needed)
-- Silently update data by appending <ACT>[...]</ACT> at the very end
-- Never mention ACT. Never say "I've updated" — just confirm naturally.
+Reply concisely 2-4 lines. Append <ACT>[...]</ACT> silently at end to update data. Never mention ACT.
 
-ACTIONS (always a JSON array, even one action):
+ACTIONS (JSON array always):
 {"t":"add_project","name":"string","color":"#hex"}
 {"t":"add_task","proj":"project name or null","text":"string","priority":"high|normal|low"}
 {"t":"done_task","proj":"project name or null","match":"partial task text"}
@@ -357,8 +358,8 @@ MATCHING: match tasks by first ~15 chars, case-insensitive.
       const done = (p.tasks||[]).filter(t=>t.done);
       s += `\n▸ ${p.name} [${timeAgo(p.updatedAt)}]\n`;
       s += `  Open (${open.length}): ${open.map(t=>`"${t.text}"[${t.priority||'normal'}]`).join(' | ')||'none'}\n`;
-      s += `  Done (${done.length}): ${done.slice(-3).map(t=>`"${t.text}"`).join(' | ')||'none'}\n`;
-      if (p.logs?.length) s += `  Last log: "${p.logs[0].text}" — ${timeAgo(p.logs[0].ts)}\n`;
+      s += `  Done (${done.length}): ${done.slice(-2).map(t=>`"${t.text}"`).join(' | ')||'none'}\n`;
+      if (p.logs?.length) s += `  Last log: "${p.logs[0].text.slice(0,80)}" — ${timeAgo(p.logs[0].ts)}\n`;
     });
   }
   const gen = data.generalTasks||[];
@@ -370,9 +371,9 @@ MATCHING: match tasks by first ~15 chars, case-insensitive.
   const notes = data.notes||[];
   if (notes.length) {
     s += '\nNOTES:\n';
-    notes.forEach(n=>s+=`  [${n.id}] "${n.text}" (${timeAgo(n.ts)})\n`);
+    notes.forEach(n=>s+=`  [${n.id}] "${n.text.slice(0,60)}" (${timeAgo(n.ts)})\n`);
   }
-  s += '\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBe direct. No filler. Prioritised list when asked what\'s pending or what to do next.';
+  s += '\nBe direct, no filler. Prioritise when asked what is pending.';
   return s;
 }
 
@@ -430,10 +431,91 @@ function fp(name) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// CONTEXT WINDOW MANAGEMENT
+// ══════════════════════════════════════════════════════════════════
+// Strategy: keep last 12 fresh messages. When msgs > 30, auto-compress
+// older ones into a rolling digest so nothing is lost, just condensed.
+// The system prompt always has full live data anyway — so chat history
+// is only needed for conversational continuity, not fact recall.
+
+const MSG_FRESH  = 12;   // always send last N messages verbatim
+const MSG_WARN   = 25;   // show yellow badge
+const MSG_COMPRESS = 35; // auto-compress oldest down to digest
+
+let ctxDigest = '';  // rolling summary of compressed messages
+
+function getApiMsgs() {
+  if (msgs.length <= MSG_FRESH) return msgs.map(m=>({role:m.role,content:m.content}));
+  // prepend digest as a system-like context message if we have one
+  const fresh = msgs.slice(-MSG_FRESH).map(m=>({role:m.role,content:m.content}));
+  if (!ctxDigest) return fresh;
+  // inject digest as first user/assistant pair so model has continuity
+  return [
+    {role:'user', content:`[CONVERSATION DIGEST — earlier context]
+${ctxDigest}`},
+    {role:'assistant', content:'Understood. Continuing with full context.'},
+    ...fresh
+  ];
+}
+
+function updateCtxBadge() {
+  const badge = document.getElementById('ctx-badge');
+  if (!badge) return;
+  const n = msgs.length;
+  if (n < MSG_WARN) { badge.style.display='none'; return; }
+  badge.style.display = 'block';
+  if (n >= MSG_COMPRESS) {
+    badge.style.color = '#ff4444';
+    badge.style.borderColor = '#ff4444';
+    badge.textContent = `⚠ ${n} msgs — tap to compress`;
+  } else {
+    badge.style.color = '#ffaa00';
+    badge.style.borderColor = '#664400';
+    badge.textContent = `${n} msgs`;
+  }
+}
+
+async function summariseOldMsgs() {
+  if (msgs.length < MSG_FRESH + 4) return;
+  const toCompress = msgs.slice(0, -MSG_FRESH);
+  if (!toCompress.length) return;
+  setBusy(true);
+  try {
+    const convo = toCompress.map(m=>`${m.role==='user'?'DJ':'JARVIS'}: ${m.content}`).join('
+');
+    const prompt = `Summarise this conversation history in 8–12 bullet points. Focus on decisions made, tasks completed/added, project updates, and any important context for future conversations. Be specific and factual.
+
+${convo}`;
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','anthropic-version':'2023-06-01','x-api-key':API_KEY,'anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:512,messages:[{role:'user',content:prompt}]})
+    });
+    const json = await res.json();
+    const summary = json.content?.find(b=>b.type==='text')?.text || '';
+    if (summary) {
+      ctxDigest = (ctxDigest ? ctxDigest + '
+
+[Earlier digest]
+' + summary : summary);
+      msgs = msgs.slice(-MSG_FRESH);  // keep only fresh messages
+      localStorage.setItem('jv3-digest', ctxDigest);
+      saveAll();
+      renderChat();
+      updateCtxBadge();
+    }
+  } catch(e) { console.warn('Summarise failed:', e); }
+  setBusy(false);
+}
+
+// ══════════════════════════════════════════════════════════════════
 // API CALL
 // ══════════════════════════════════════════════════════════════════
 async function callAPI() {
-  const apiMsgs = msgs.slice(-20).map(m=>({role:m.role, content:m.content}));
+  // Auto-compress if over limit
+  if (msgs.length >= MSG_COMPRESS) await summariseOldMsgs();
+
+  const apiMsgs = getApiMsgs();
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -443,7 +525,7 @@ async function callAPI() {
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
       system: buildSystem(),
       messages: apiMsgs,
@@ -484,7 +566,18 @@ async function sendMsg(text) {
     renderChat();
   }
   setBusy(false);
+  updateCtxBadge();
   document.getElementById('inp').focus();
+}
+
+function clearChat() {
+  if (msgs.length === 0) return;
+  msgs = [];
+  ctxDigest = '';
+  localStorage.removeItem('jv3-msgs');
+  localStorage.removeItem('jv3-digest');
+  renderChat();
+  updateCtxBadge();
 }
 
 function setBusy(b) {
@@ -495,6 +588,79 @@ function setBusy(b) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// HOME SCREEN DASHBOARD
+// ══════════════════════════════════════════════════════════════════
+let clockTimer = null;
+
+function startClock() {
+  if (clockTimer) clearInterval(clockTimer);
+  clockTimer = setInterval(() => {
+    const el = document.getElementById('home-clock');
+    if (!el) { clearInterval(clockTimer); clockTimer = null; return; }
+    el.textContent = nowStr();
+  }, 1000);
+}
+
+function nowStr() {
+  return new Date().toLocaleString('en-IN', {
+    weekday:'short', day:'numeric', month:'short',
+    hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:true
+  });
+}
+
+function buildHomeScreen() {
+  // Collect all pending tasks across all projects + general
+  const projs = Object.values(data.projects).sort((a,b)=>b.updatedAt-a.updatedAt);
+  const allPending = [];
+  projs.forEach(p => {
+    p.tasks.filter(t=>!t.done).forEach(t => allPending.push({text:t.text, proj:p.name, color:p.color, priority:t.priority||'normal'}));
+  });
+  data.generalTasks.filter(t=>!t.done).forEach(t => allPending.push({text:t.text, proj:'General', color:'#336633', priority:t.priority||'normal'}));
+
+  // Sort: high priority first
+  allPending.sort((a,b) => (a.priority==='high'?0:1) - (b.priority==='high'?0:1));
+
+  const topTasks = allPending.slice(0, 5);
+
+  const tasksHtml = topTasks.length === 0
+    ? `<div style="color:var(--text4);font-size:11px;padding:8px 0;">All clear — no pending tasks.</div>`
+    : topTasks.map((t,i) => `
+        <div style="display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--border);${i===topTasks.length-1?'border-bottom:none;':''}">
+          <div style="width:6px;height:6px;border-radius:50%;background:${t.color};margin-top:4px;flex-shrink:0;${t.priority==='high'?'box-shadow:0 0 5px '+t.color+'88;':''}"></div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;color:var(--text2);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(t.text)}</div>
+            <div style="font-size:9px;color:var(--text4);margin-top:2px;letter-spacing:.06em;">${esc(t.proj)}${t.priority==='high'?' · HIGH':''}</div>
+          </div>
+          <div onclick="sendMsg('Mark done: ${esc(t.text).replace(/'/g,"\'")}');event.stopPropagation();" style="font-size:9px;color:var(--text4);cursor:pointer;padding:2px 5px;border:1px solid var(--border);border-radius:4px;flex-shrink:0;">✓</div>
+        </div>`).join('');
+
+  const moreCount = allPending.length - topTasks.length;
+
+  return `<div style="padding:16px 0 20px;animation:fi .25s ease;">
+    <!-- Live clock -->
+    <div style="margin-bottom:16px;padding:12px 14px;background:var(--bg3);border:1.5px solid var(--border);border-radius:10px;">
+      <div style="font-size:9px;color:var(--text4);letter-spacing:.15em;margin-bottom:4px;">NOW</div>
+      <div id="home-clock" style="font-size:13px;color:var(--text);letter-spacing:.06em;">${nowStr()}</div>
+    </div>
+
+    <!-- Next up -->
+    <div style="margin-bottom:16px;background:var(--bg3);border:1.5px solid var(--border);border-radius:10px;overflow:hidden;">
+      <div style="padding:10px 14px 0;display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:9px;color:var(--text4);letter-spacing:.15em;">NEXT UP${allPending.length>0?' — '+allPending.length+' total':''}</div>
+        ${moreCount>0?`<div style="font-size:9px;color:var(--text4);">+${moreCount} more</div>`:''}
+      </div>
+      <div style="padding:4px 14px 8px;">${tasksHtml}</div>
+    </div>
+
+    <!-- Quick prompts -->
+    <div style="font-size:9px;color:var(--text4);letter-spacing:.14em;margin-bottom:9px;">QUICK</div>
+    <div class="qs-grid">
+      ${QUICK.map(q=>`<button class="qs-btn" onclick="sendMsg(${JSON.stringify(q)})">${esc(q)}</button>`).join('')}
+    </div>
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════
 // RENDER CHAT
 // ══════════════════════════════════════════════════════════════════
 function renderChat() {
@@ -502,24 +668,12 @@ function renderChat() {
   const empty = msgs.length === 0;
 
   if (empty) {
-    wrap.innerHTML = `
-      <div style="padding-top:20px;padding-bottom:16px;animation:fi .25s ease;">
-        <div class="empty-quote">"Online. What's on your mind?"</div>
-        <div class="qs-label">QUICK START</div>
-        <div class="qs-grid">
-          ${QUICK.map(q=>`<button class="qs-btn" onclick="sendMsg(${JSON.stringify(q)})">${esc(q)}</button>`).join('')}
-        </div>
-        <div class="how-card">
-          <div class="how-label">HOW TO USE</div>
-          <div class="how-item">"Finished soldering FLUX v1.2 board"</div>
-          <div class="how-item">"Add task: check J3 connector orientation"</div>
-          <div class="how-item">"Create project: WiFi Board"</div>
-          <div class="how-item">"What should I focus on right now?"</div>
-        </div>
-      </div>`;
+    wrap.innerHTML = buildHomeScreen();
+    startClock();
     return;
   }
 
+  if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
   let html = '';
   msgs.forEach((m, i) => {
     if (m.role === 'user') {
@@ -791,6 +945,7 @@ function startApp() {
   loadAll();
   renderChat();
   updateBoardBtn();
+  updateCtxBadge();
   document.getElementById('inp').addEventListener('keydown', e=>{
     if(e.key==='Enter'&&!e.shiftKey&&!busy){e.preventDefault();sendMsg();}
   });
