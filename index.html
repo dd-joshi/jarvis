@@ -893,7 +893,7 @@ function askJarvis(name) {
 // ══════════════════════════════════════════════════════════════════
 function showSettings() {
   const newKey = prompt('Update API key (leave blank to cancel):');
-  if (newKey && newKey.trim().startsWith('sk-ant-')) {
+  if (newKey && newKey.trim().startsWith('sk-') && newKey.trim().length > 20) {
     API_KEY = newKey.trim();
     localStorage.setItem('jv3-key', API_KEY);
     alert('API key updated.');
@@ -906,37 +906,27 @@ function showSettings() {
 function initSetup() {
   const inp = document.getElementById('api-key-inp');
   const btn = document.getElementById('setup-btn');
-  inp.addEventListener('input', ()=> btn.disabled = !inp.value.trim().startsWith('sk-ant-'));
-  inp.addEventListener('keydown', e=>{ if(e.key==='Enter') trySetup(); });
+  // Enable button as soon as key looks like any Anthropic key (starts with sk-, length > 20)
+  function checkKey() {
+    const v = inp.value.trim();
+    btn.disabled = !(v.startsWith('sk-') && v.length > 20);
+  }
+  inp.addEventListener('input', checkKey);
+  inp.addEventListener('change', checkKey);  // catches paste/autofill
+  inp.addEventListener('keydown', e => { if(e.key==='Enter' && !btn.disabled) trySetup(); });
   btn.addEventListener('click', trySetup);
 }
 
-async function trySetup() {
+function trySetup() {
   const key = document.getElementById('api-key-inp').value.trim();
-  if (!key.startsWith('sk-ant-')) {
-    document.getElementById('setup-err').textContent = 'Key must start with sk-ant-';
+  if (!key.startsWith('sk-') || key.length < 20) {
+    document.getElementById('setup-err').textContent = 'Enter a valid Anthropic API key (starts with sk-)';
     return;
   }
-  document.getElementById('setup-btn').disabled = true;
-  document.getElementById('setup-btn').textContent = 'Verifying…';
-  document.getElementById('setup-err').textContent = '';
-
-  // quick test call
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST',
-      headers:{'Content-Type':'application/json','anthropic-version':'2023-06-01','x-api-key':key,'anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:5,messages:[{role:'user',content:'hi'}]})
-    });
-    if (!res.ok) throw new Error((await res.json()).error?.message||'Invalid key');
-    API_KEY = key;
-    localStorage.setItem('jv3-key', key);
-    startApp();
-  } catch(e) {
-    document.getElementById('setup-err').textContent = e.message;
-    document.getElementById('setup-btn').disabled = false;
-    document.getElementById('setup-btn').textContent = 'Start JARVIS →';
-  }
+  // No network verification — saves a roundtrip, first real message will catch bad keys
+  API_KEY = key;
+  localStorage.setItem('jv3-key', key);
+  startApp();
 }
 
 function startApp() {
